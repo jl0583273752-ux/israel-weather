@@ -1,0 +1,41 @@
+name: סנכרון תחזית ישראל
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # כל 15 דקות (GitHub עשוי לעכב ריצות בכמה דקות בשעות עומס)
+  workflow_dispatch: {}       # כפתור "Run workflow" לסנכרון ידני
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: pages
+        uses: actions/configure-pages@v5
+      - name: שאיבת הנתונים מכל האתרים
+        run: node scripts/sync.mjs
+        env:
+          PREV_URL: ${{ steps.pages.outputs.base_url }}/data.json
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - id: deploy
+        uses: actions/deploy-pages@v4
