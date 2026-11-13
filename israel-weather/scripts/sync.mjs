@@ -83,7 +83,8 @@ function cityDoc(id, c, om) { // פורמט "שכבת ערים" של הדף (ש�
 
 /* ---------- 2. Mavir ---------- */
 const decode = s => s.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ")
-  .replace(/&quot;/g, '"').replace(/&#039;|&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/\s+/g, " ");
+  .replace(/&quot;/g, '"').replace(/&#039;|&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/&deg;/g, "°").replace(/&minus;/g, "-").replace(/&ndash;|&mdash;/g, "-").replace(/&lrm;|&rlm;|&#8206;|&#8207;/g, "").replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16))).replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(+n)).replace(/&amp;/g, "&").replace(/[\u200e\u200f\u202a-\u202e]/g, "").replace(/\s+/g, " ");
+const MAVDBG = [];
 const HEB_MONTH = { "ינואר": 1, "פברואר": 2, "מרץ": 3, "אפריל": 4, "מאי": 5, "יוני": 6, "יולי": 7, "אוגוסט": 8, "ספטמבר": 9, "אוקטובר": 10, "נובמבר": 11, "דצמבר": 12 };
 function parseMavir(html, slug, city) {
   const tx = decode(html);
@@ -91,7 +92,7 @@ function parseMavir(html, slug, city) {
   let updated = null; const um = tx.match(/עדכון אחרון ב-?\s*(\d{1,2})\s+(\S+)\s+(\d{4})[^0-9]{0,20}(\d{1,2}):(\d{2})/);
   if (um && HEB_MONTH[um[2]]) updated = `${um[3]}-${String(HEB_MONTH[um[2]]).padStart(2, "0")}-${um[1].padStart(2, "0")}T${um[4].padStart(2, "0")}:${um[5]}:00+02:00`;
   // ימים: "+24° +13° היום בהיר סיכוי למשקעים 11% 0.0 מ"מ רוח צפונית מערבית ... במהירויות עד 4.4 מ'/ש'"
-  const re = /([+-−]?\d{1,2})°\s*([+-−]?\d{1,2})°\s*(היום|מחר|[^0-9°]{0,12}?(\d{2})\.(\d{2}))\s*(בהיר|מעונן חלקית|מעונן|גשם[^\s]*|ממטרים|סופ[^\s]*|ערפל)?[^%]{0,40}?סיכוי למשקעים\s*(\d{1,3})%\s*([\d.]+)\s*מ["״׳']?מ\s*רוח\s+(.{2,30}?)\s+(?:%%WN_DIRECTION%%\s*)?במהירויות עד\s*([\d.]+)/g;
+  const re = /([+\-−]?\d{1,2})\s*°?C?\s*([+\-−]?\d{1,2})\s*°?C?\s*(היום|מחר|[^0-9°]{0,12}?(\d{2})\.(\d{2}))\s*(בהיר|מעונן חלקית|מעונן|גשם[^\s]*|ממטרים|סופ[^\s]*|ערפל)?[^%]{0,40}?סיכוי למשקעים\s*(\d{1,3})%\s*([\d.]+)\s*מ["״׳']?מ\s*רוח\s+(.{2,30}?)\s+(?:%%WN_DIRECTION%%\s*)?במהירויות עד\s*([\d.]+)/g;
   const days = []; const year = TODAY.slice(0, 4); let m;
   while ((m = re.exec(tx))) {
     const date = m[3] === "היום" ? TODAY : m[3] === "מחר" ? addDays(TODAY, 1) : `${year}-${m[5]}-${m[4]}`;
@@ -99,7 +100,7 @@ function parseMavir(html, slug, city) {
     const code = rain >= 1 ? 4 : /סופ/.test(cond) ? 5 : /גשם|ממטר/.test(cond) ? 4 : cond === "מעונן חלקית" ? 2 : cond === "מעונן" ? 3 : 0;
     if (!days.some(d => d.date === date)) days.push({ date, max: +m[1].replace("−", "-"), min: +m[2].replace("−", "-"), code, prob: +m[7], rain, dir: m[9].trim(), wind: Math.round(+m[10] * 3.6) });
   }
-  if (!days.length) return null;
+  if (!days.length) { if (!MAVDBG.length) { const i = tx.indexOf("סיכוי למשקעים"); MAVDBG.push({ slug, len: html.length, sample: i < 0 ? tx.slice(0, 1500) : tx.slice(Math.max(0, i - 700), i + 500) }); } return null; }
   return { city, url: `https://mavir.co.il/israel/${slug}`, updated: updated || ilIso(), days: days.filter(d => d.date >= TODAY).slice(0, 10) };
 }
 
@@ -143,13 +144,16 @@ const FEEDS = [
   ["i24NEWS", "https://www.i24news.tv/he/rss"],
   ["מקור ראשון", "https://www.makorrishon.co.il/feed/"],
 ];
-const WX = /מזג ה?אוויר|השירות המטאורולוגי|תחזית (מזג|לסופ|לימים|ל?שבת)|גשמים?\b|שיטפונ|הצפות|שרב|חמסין|עומס חום|סופת (רעמים|חול)|ברקים|ברד|שלג|קרה|רוחות חזקות|אובך|מפלס הכנרת|הכנרת עלה|מכ"ם גשם/;
-const NOT_WX = /בורסה|מניות|כלכל|ריבית|בחירות|סקר|כדורגל|כדורסל/;
+// מילה עברית שלמה (מותרות אותיות שימוש בתחילתה: ו, ה, ב, ל, מ, ש, כ)
+const W = list => new RegExp(`(?:^|[^א-ת])[ובהלמשכ]{0,2}(?:${list})(?=$|[^א-ת])`);
+const WX = W("מזג ה?אוויר|מזג־האוויר|התחזית|תחזית מזג|השירות המטאורולוגי|גשם|גשמים|גשום|גשומה|ממטרים|שיטפון|שיטפונות|הצפות|הצפה|שרב|חמסין|עומס חום|סופת רעמים|סופות רעמים|סופת חול|ברקים|ברד|שלג|שלגים|קרה|רוחות|טמפרטורות|הטמפרטורות|אובך|מפלס הכנרת|סערה|מערכת חורפית|קור|חום כבד|גל חום");
+const NOT_WX = W("בורסה|מניות|כלכלה|ריבית|בחירות|סקר|כדורגל|כדורסל|הכנסת|ח\"כ|ח\"כים|בג\"ץ|גיוס|ממשלה|קואליציה|אופוזיציה|משטרה|שוטר|רצח|תביעה|תביעת|צה\"ל|איראן|חמאס|חיזבאללה|פיגוע|מחבל|זמר|זמרת|שחקן|שחקנית|סדרה|סרט|ריאליטי|דוגמנית");
+const isWx = title => WX.test(title) && !NOT_WX.test(title);
 async function fetchNews() {
   const res = await pool(FEEDS, 4, async ([src, url]) => rssItems(await get(url, { timeout: 20000 })).map(it => ({ ...it, src })));
   const out = [];
   for (const list of res) for (const it of list || []) {
-    const t = it.title + " " + it.desc; if (!WX.test(t) || NOT_WX.test(it.title)) continue;
+    const t = it.title + " " + it.desc; if (!isWx(it.title)) continue;
     const d = it.date ? new Date(it.date) : null; if (!d || isNaN(d) || NOW - d > 48 * 36e5) continue;
     out.push({ src: it.src, t: it.title, sum: it.desc.length > 180 ? it.desc.slice(0, 177).replace(/\s\S*$/, "") + "…" : it.desc, time: ilIso(d), u: it.link,
       tags: [/שיטפ|הצפות|הצפה/.test(t) && "הצפות", /ברק|סופת רעמים/.test(t) && "ברקים", /שרב|חום/.test(t) && "חום", /גשם/.test(t) && "גשם"].filter(Boolean), zones: zonesOf(t) });
@@ -157,7 +161,7 @@ async function fetchNews() {
   return out;
 }
 function mergeNews(fresh, old) {
-  const seen = new Set(), all = [...fresh, ...(old || [])].filter(n => n && n.u && NOW - new Date(n.time) < 48 * 36e5)
+  const seen = new Set(), all = [...fresh, ...(old || [])].filter(n => n && n.u && isWx(n.t || "") && NOW - new Date(n.time) < 48 * 36e5)
     .filter(n => { const k = n.u.split("?")[0]; if (seen.has(k)) return false; seen.add(k); return true; });
   return all.sort((a, b) => new Date(b.time) - new Date(a.time)).slice(0, 25);
 }
@@ -233,6 +237,7 @@ const out = {
       model: { name: "תחזית מודלים", updated, url: "https://open-meteo.com/", via: "Open-Meteo – מודלים מספריים (בהם ECMWF), לכל יישוב לפי מיקום" } } },
   stations, cities, mavir,
   live: { updated: newsUp || updated, news, flashes, warnings },
+  debug: { mavir: MAVDBG, mavirOk: mOk, mavirTried: todo.length },
 };
 await fs.mkdir(path.dirname(OUT), { recursive: true });
 await fs.writeFile(OUT, JSON.stringify(out));
